@@ -15,7 +15,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ProfileProvider>
-        <BrowserRouter>
+        <BrowserRouter basename="/LinguaLoop">
           <NavBar />
           <main className="page">
             <Suspense fallback={<p className="page-loading">Loading…</p>}>
