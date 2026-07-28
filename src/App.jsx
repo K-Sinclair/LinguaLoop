@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { ProfileProvider } from './context/ProfileContext.jsx';
 import NavBar from './components/NavBar.jsx';
@@ -16,7 +16,7 @@ export default function App() {
     <AuthProvider>
       <ProfileProvider>
 <<<<<<< HEAD
-        <BrowserRouter basename="/LinguaLoop">
+        <HashRouter>
           <NavBar />
           <main className="page">
             <Suspense fallback={<p className="page-loading">Loading…</p>}>
