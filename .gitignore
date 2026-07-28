@@ -2,4 +2,7 @@ node_modules
 dist
 .env
 .env.local
+.supabase
+supabase/.temp
+supabase/.branches
 .DS_Store

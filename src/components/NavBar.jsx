@@ -23,7 +23,7 @@ export default function NavBar() {
             </button>
           )}
           <Link to="/" className="nav__brand">
-            Language Learning App
+            LinguaLoop
           </Link>
         </div>
         {!session && (

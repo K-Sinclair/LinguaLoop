@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { canUseUsernameColumn, normalizeUsername } from '../lib/profileHelpers.js';
+import { isValidUsername, normalizeUsername } from '../lib/profileHelpers.js';
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -11,7 +11,6 @@ export default function Signup() {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [error, setError] = useState(null);
-  const [alreadyRegistered, setAlreadyRegistered] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkEmail, setCheckEmail] = useState(false);
 
@@ -20,100 +19,63 @@ export default function Signup() {
     if (loading || authLoading || user) return;
 
     setError(null);
-    setAlreadyRegistered(false);
     setLoading(true);
 
     const normalizedUsername = normalizeUsername(username);
-    if (!normalizedUsername) {
-      setError('Please choose a username using letters, numbers, dots, or dashes.');
+    if (!isValidUsername(normalizedUsername)) {
+      setError('Use 3–30 characters. Start with a letter or number, then use letters, numbers, dots, dashes, or underscores.');
       setLoading(false);
       return;
     }
 
-    const { available: usernameColumnAvailable, error: usernameCheckError } = await canUseUsernameColumn(supabase);
+    // RLS prevents anonymous visitors from selecting other profile rows, so
+    // availability is checked through a narrow security-definer function.
+    // The database's unique index remains the final protection against races.
+    const { data: isAvailable, error: usernameCheckError } = await supabase.rpc(
+      'is_username_available',
+      { check_username: normalizedUsername }
+    );
 
-    if (usernameCheckError && !usernameColumnAvailable) {
+    if (usernameCheckError) {
       setLoading(false);
-      setError('Username support is not enabled yet in the database. Please add the profiles.username column first.');
+      setError('We could not check that username. Please try again.');
       return;
     }
 
-    if (usernameColumnAvailable) {
-      // Direct SELECT can't be used here -- RLS's "auth.uid() = id" policy
-      // means an anonymous, pre-signup visitor can never see anyone else's
-      // row anyway, so a plain query would always (wrongly) say "available."
-      // The RPC runs with elevated privileges just for this narrow check.
-      const { data: isAvailable, error: usernameCheckRpcError } = await supabase.rpc(
-        'is_username_available',
-        { check_username: normalizedUsername }
-      );
-
-      if (usernameCheckRpcError) {
-        setLoading(false);
-        setError(usernameCheckRpcError.message);
-        return;
-      }
-
-      if (!isAvailable) {
-        setLoading(false);
-        setError('That username is already taken. Please choose another one.');
-        return;
-      }
+    if (!isAvailable) {
+      setLoading(false);
+      setError('That username is already taken. Please choose another one.');
+      return;
     }
 
-    const siteUrl = import.meta.env.VITE_SITE_URL?.trim() || window.location.origin;
-    const redirectUrl = new URL('/login', siteUrl).toString();
+    // BASE_URL includes the GitHub Pages repository path in production.
+    // The Pages 404 fallback restores this client-side route after confirmation.
+    const redirectUrl = new URL(
+      `${import.meta.env.BASE_URL}dashboard`,
+      window.location.origin
+    ).toString();
 
     const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: redirectUrl },
+      options: {
+        emailRedirectTo: redirectUrl,
+        data: {
+          username: normalizedUsername,
+          display_name: normalizedUsername,
+        },
+      },
     });
 
     setLoading(false);
 
-    // Supabase deliberately avoids confirming outright that an email is
-    // taken (to stop attackers enumerating accounts). Two signals reveal it
-    // instead: an explicit "already registered" error, or a successful-
-    // looking response where `identities` comes back empty -- that's
-    // Supabase's way of saying "this confirmed account already exists"
-    // without an error message that would leak the same info to a stranger.
-    // This check happens BEFORE any profile write is attempted below --
-    // writing to a stranger's profile row would only ever be blocked by
-    // RLS anyway, but there's no reason to attempt it in the first place.
-    const looksAlreadyRegistered =
-      signUpError?.message?.toLowerCase().includes('already registered') ||
-      (!signUpError && data?.user && data.user.identities?.length === 0);
-
-    if (looksAlreadyRegistered) {
-      setAlreadyRegistered(true);
-      return;
-    }
-
     if (signUpError) {
-      setError(signUpError.message);
+      setError(
+        signUpError.message?.toLowerCase().includes('database error')
+          ? 'We could not create that account. The username may have just been taken; please try another one.'
+          : signUpError.message
+      );
       return;
-    }
-
-    if (data?.user) {
-      const profilePayload = {
-        id: data.user.id,
-        display_name: username.trim(),
-      };
-
-      if (usernameColumnAvailable) {
-        profilePayload.username = normalizedUsername;
-      }
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert(profilePayload, { onConflict: 'id' })
-        .select('*')
-        .maybeSingle();
-
-      if (profileError) {
-        console.warn('Could not save initial profile data:', profileError);
-      }
     }
 
     if (!data.session) {
@@ -146,21 +108,6 @@ export default function Signup() {
     );
   }
 
-  if (alreadyRegistered) {
-    return (
-      <section className="card">
-        <p className="eyebrow">Auth</p>
-        <h1>Account already exists</h1>
-        <p>
-          An account with <strong>{email}</strong> is already registered.
-        </p>
-        <p className="form__switch">
-          <Link to="/login">Log in instead</Link>
-        </p>
-      </section>
-    );
-  }
-
   if (checkEmail) {
     return (
       <section className="auth-shell">
@@ -168,7 +115,8 @@ export default function Signup() {
           <p className="eyebrow">Almost there</p>
           <h1>Check your email</h1>
           <p className="auth-card__text">
-            We sent a confirmation link to <strong>{email}</strong>. Open it to confirm your account, then come back and log in.
+            If this address can be registered, a confirmation link will arrive at{' '}
+            <strong>{email}</strong>. Open it to confirm your account.
           </p>
           <p className="form__switch">
             <Link to="/login">Go to login</Link>
@@ -193,6 +141,11 @@ export default function Signup() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="choose-a-username"
+              minLength={3}
+              maxLength={30}
+              pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,29}"
+              title="3–30 characters; start with a letter or number"
+              autoComplete="username"
               required
             />
           </label>
@@ -203,6 +156,7 @@ export default function Signup() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              autoComplete="email"
               required
             />
           </label>
@@ -214,6 +168,7 @@ export default function Signup() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 6 characters"
               minLength={6}
+              autoComplete="new-password"
               required
             />
           </label>
