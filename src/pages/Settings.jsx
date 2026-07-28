@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useProfile } from '../context/ProfileContext.jsx';
 import { supabase } from '../lib/supabaseClient.js';
-import { canUseUsernameColumn, getProfileInitials, normalizeUsername } from '../lib/profileHelpers.js';
+import {
+  getProfileInitials,
+  isValidUsername,
+  normalizeUsername,
+} from '../lib/profileHelpers.js';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -49,13 +53,34 @@ export default function Settings() {
     const file = e.target.files[0];
     if (!file || !user) return;
 
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const maxFileSize = 5 * 1024 * 1024;
+
+    if (!allowedTypes.includes(file.type)) {
+      setError('Choose a JPEG, PNG, WebP, or GIF image.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > maxFileSize) {
+      setError('Profile photos must be 5 MB or smaller.');
+      e.target.value = '';
+      return;
+    }
+
     setError(null);
     setUploading(true);
 
-    const filePath = `${user.id}/${Date.now()}-${file.name}`;
+    // A stable path replaces the previous avatar instead of leaving every
+    // historical upload in Storage.
+    const filePath = `${user.id}/avatar`;
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { upsert: true });
+      .upload(filePath, file, {
+        upsert: true,
+        contentType: file.type,
+        cacheControl: '3600',
+      });
 
     if (uploadError) {
       setUploading(false);
@@ -64,10 +89,11 @@ export default function Settings() {
     }
 
     const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+    const avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;
 
     const { error: updateError } = await supabase
       .from('profiles')
-      .update({ avatar_url: urlData.publicUrl })
+      .update({ avatar_url: avatarUrl })
       .eq('id', user.id);
 
     setUploading(false);
@@ -91,17 +117,9 @@ export default function Settings() {
 
     const normalizedUsername = normalizeUsername(username);
 
-    if (!normalizedUsername && username.trim()) {
+    if (!isValidUsername(normalizedUsername)) {
       setSaving(false);
-      setError('Please choose a username using letters, numbers, dots, or dashes.');
-      return;
-    }
-
-    const { available: usernameColumnAvailable, error: usernameColumnError } = await canUseUsernameColumn(supabase);
-
-    if (!usernameColumnAvailable && username.trim()) {
-      setSaving(false);
-      setError('Username support is not enabled yet in the database. Please add the profiles.username column first.');
+      setError('Use 3–30 characters. Start with a letter or number, then use letters, numbers, dots, dashes, or underscores.');
       return;
     }
 
@@ -109,7 +127,7 @@ export default function Settings() {
     // as Signup, this has to go through the RPC rather than a direct SELECT,
     // since RLS's "auth.uid() = id" policy means you can never see whether
     // someone ELSE already has this username via a plain query.
-    if (usernameColumnAvailable && normalizedUsername && normalizedUsername !== profile?.username) {
+    if (normalizedUsername !== profile?.username) {
       const { data: isAvailable, error: usernameCheckError } = await supabase.rpc(
         'is_username_available',
         { check_username: normalizedUsername }
@@ -142,11 +160,8 @@ export default function Settings() {
     const profileUpdates = {
       display_name: displayName || null,
       native_language_id: nativeLanguageId || null,
+      username: normalizedUsername,
     };
-
-    if (usernameColumnAvailable) {
-      profileUpdates.username = normalizedUsername || null;
-    }
 
     const { error: updateError } = await supabase
       .from('profiles')
@@ -202,7 +217,7 @@ export default function Settings() {
               {uploading ? 'Uploading…' : 'Change photo'}
               <input
                 type="file"
-                accept="image/*"
+                accept="image/jpeg,image/png,image/webp,image/gif"
                 onChange={handleAvatarChange}
                 disabled={uploading}
                 hidden
@@ -218,6 +233,7 @@ export default function Settings() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 placeholder="What should we call you?"
+                maxLength={80}
               />
             </label>
 
@@ -228,6 +244,12 @@ export default function Settings() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="choose-a-username"
+                minLength={3}
+                maxLength={30}
+                pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,29}"
+                title="3–30 characters; start with a letter or number"
+                autoComplete="username"
+                required
               />
             </label>
 
@@ -238,6 +260,7 @@ export default function Settings() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
+                autoComplete="email"
               />
             </label>
 

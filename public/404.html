@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Opening LinguaLoop…</title>
+  </head>
+  <body>
+    <p>Opening LinguaLoop…</p>
+    <script>
+      (() => {
+        const appBase = '/LinguaLoop/';
+
+        try {
+          window.sessionStorage.setItem(
+            'lingualoop:spa-redirect',
+            window.location.href
+          );
+        } catch {
+          // A base-page redirect is still preferable to a dead GitHub 404.
+        }
+
+        window.location.replace(`${window.location.origin}${appBase}`);
+      })();
+    </script>
+  </body>
+</html>
