@@ -15,6 +15,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ProfileProvider>
+<<<<<<< HEAD
         <BrowserRouter basename="/LinguaLoop">
           <NavBar />
           <main className="page">
