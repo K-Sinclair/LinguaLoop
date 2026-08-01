@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import AppIcon from '../components/AppIcon.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useProfile } from '../context/ProfileContext.jsx';
 import { supabase } from '../lib/supabaseClient.js';
@@ -8,6 +9,8 @@ import {
   normalizeUsername,
 } from '../lib/profileHelpers.js';
 
+const DAILY_GOALS = [5, 10, 15, 20];
+
 export default function Settings() {
   const { user } = useAuth();
   const { profile, loading, refreshProfile } = useProfile();
@@ -16,6 +19,9 @@ export default function Settings() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [nativeLanguageId, setNativeLanguageId] = useState('');
+  const [learningLanguageId, setLearningLanguageId] = useState('');
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState(10);
+  const [showRomanization, setShowRomanization] = useState(true);
   const [languages, setLanguages] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -28,29 +34,32 @@ export default function Settings() {
       setDisplayName(profile.display_name || '');
       setUsername(profile.username || '');
       setNativeLanguageId(profile.native_language_id || '');
+      setLearningLanguageId(profile.learning_language_id || '');
+      setDailyGoalMinutes(profile.daily_goal_minutes ?? 10);
+      setShowRomanization(profile.show_romanization ?? true);
     }
 
-    if (user?.email) {
-      setEmail(user.email);
-    }
+    if (user?.email) setEmail(user.email);
   }, [profile, user?.email]);
 
   useEffect(() => {
     supabase
       .from('languages')
-      .select('id, name')
+      .select('id, code, name')
       .order('name')
-      .then(({ data, error: langError }) => {
-        if (langError) {
-          console.warn('Could not load languages:', langError);
+      .then(({ data, error: languageError }) => {
+        if (languageError) {
+          setError('We couldn’t load the language options. Please refresh and try again.');
           return;
         }
         setLanguages(data ?? []);
       });
   }, []);
 
-  async function handleAvatarChange(e) {
-    const file = e.target.files[0];
+  const learningLanguages = languages.filter((language) => language.code !== 'en');
+
+  async function handleAvatarChange(event) {
+    const file = event.target.files[0];
     if (!file || !user) return;
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -58,21 +67,20 @@ export default function Settings() {
 
     if (!allowedTypes.includes(file.type)) {
       setError('Choose a JPEG, PNG, WebP, or GIF image.');
-      e.target.value = '';
+      event.target.value = '';
       return;
     }
 
     if (file.size > maxFileSize) {
       setError('Profile photos must be 5 MB or smaller.');
-      e.target.value = '';
+      event.target.value = '';
       return;
     }
 
     setError(null);
+    setSaved(false);
     setUploading(true);
 
-    // A stable path replaces the previous avatar instead of leaving every
-    // historical upload in Storage.
     const filePath = `${user.id}/avatar`;
     const { error: uploadError } = await supabase.storage
       .from('avatars')
@@ -90,7 +98,6 @@ export default function Settings() {
 
     const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
     const avatarUrl = `${urlData.publicUrl}?v=${Date.now()}`;
-
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: avatarUrl })
@@ -103,11 +110,12 @@ export default function Settings() {
       return;
     }
 
+    setSaved(true);
     await refreshProfile();
   }
 
-  async function handleSave(e) {
-    e.preventDefault();
+  async function handleSave(event) {
+    event.preventDefault();
     if (!user) return;
 
     setSaving(true);
@@ -123,10 +131,12 @@ export default function Settings() {
       return;
     }
 
-    // Only worth checking if the username is actually changing -- and same
-    // as Signup, this has to go through the RPC rather than a direct SELECT,
-    // since RLS's "auth.uid() = id" policy means you can never see whether
-    // someone ELSE already has this username via a plain query.
+    if (!learningLanguageId) {
+      setSaving(false);
+      setError('Choose the language you want to learn.');
+      return;
+    }
+
     if (normalizedUsername !== profile?.username) {
       const { data: isAvailable, error: usernameCheckError } = await supabase.rpc(
         'is_username_available',
@@ -158,8 +168,11 @@ export default function Settings() {
     }
 
     const profileUpdates = {
-      display_name: displayName || null,
+      display_name: displayName.trim() || null,
       native_language_id: nativeLanguageId || null,
+      learning_language_id: learningLanguageId,
+      daily_goal_minutes: Number(dailyGoalMinutes),
+      show_romanization: showRomanization,
       username: normalizedUsername,
     };
 
@@ -181,59 +194,59 @@ export default function Settings() {
     await refreshProfile();
   }
 
-  if (loading) {
-    return (
-      <section className="card">
-        <p className="eyebrow">Settings</p>
-        <h1>Loading…</h1>
-      </section>
-    );
-  }
+  if (loading) return <p className="page-loading">Loading your settings…</p>;
 
   return (
     <section className="settings-page">
-      <div className="card settings__hero">
-        <div>
-          <p className="eyebrow">Settings</p>
-          <h1>Profile settings</h1>
-          <p>
-            Manage the basics of your account while the bigger learning features are still being built.
-          </p>
-        </div>
-        <div className="settings__hero-badge">In progress</div>
-      </div>
+      <header className="settings-header">
+        <p className="eyebrow">Personalise LinguaLoop</p>
+        <h1>Settings</h1>
+        <p>Manage your public profile and decide how your learning path works.</p>
+      </header>
 
-      <div className="card settings__content settings__content--single">
-        <div className="settings__main">
-          <div className="settings__avatar-row">
-            <div className="settings__avatar">
+      <form className="settings-form" onSubmit={handleSave}>
+        <section className="settings-panel" aria-labelledby="profile-settings-title">
+          <div className="settings-panel__heading">
+            <span className="settings-panel__icon"><AppIcon name="profile" /></span>
+            <div>
+              <h2 id="profile-settings-title">Profile</h2>
+              <p>The details used across your account.</p>
+            </div>
+          </div>
+
+          <div className="settings-avatar-row">
+            <div className="settings-avatar">
               {profile?.avatar_url ? (
-                <img src={profile.avatar_url} alt="Profile" />
+                <img src={profile.avatar_url} alt="Your profile" />
               ) : (
                 <span>{getProfileInitials(profile?.display_name, user?.email)}</span>
               )}
             </div>
-            <label className="settings__avatar-upload">
-              {uploading ? 'Uploading…' : 'Change photo'}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                onChange={handleAvatarChange}
-                disabled={uploading}
-                hidden
-              />
-            </label>
+            <div>
+              <label className="button button--outline button--small settings-avatar-upload">
+                {uploading ? 'Uploading…' : 'Change photo'}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={handleAvatarChange}
+                  disabled={uploading}
+                  hidden
+                />
+              </label>
+              <p>JPEG, PNG, WebP or GIF. Maximum 5 MB.</p>
+            </div>
           </div>
 
-          <form className="form settings__form" onSubmit={handleSave}>
+          <div className="settings-grid">
             <label>
               Display name
               <input
                 type="text"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="What should we call you?"
                 maxLength={80}
+                autoComplete="name"
               />
             </label>
 
@@ -242,7 +255,7 @@ export default function Settings() {
               <input
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(event) => setUsername(event.target.value)}
                 placeholder="choose-a-username"
                 minLength={3}
                 maxLength={30}
@@ -258,9 +271,10 @@ export default function Settings() {
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
+                required
               />
             </label>
 
@@ -268,32 +282,82 @@ export default function Settings() {
               Native language
               <select
                 value={nativeLanguageId}
-                onChange={(e) => setNativeLanguageId(e.target.value)}
+                onChange={(event) => setNativeLanguageId(event.target.value)}
               >
                 <option value="">Not set</option>
-                {languages.map((lang) => (
-                  <option key={lang.id} value={lang.id}>
-                    {lang.name}
-                  </option>
+                {languages.map((language) => (
+                  <option key={language.id} value={language.id}>{language.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section className="settings-panel" aria-labelledby="learning-settings-title">
+          <div className="settings-panel__heading">
+            <span className="settings-panel__icon settings-panel__icon--purple"><AppIcon name="target" /></span>
+            <div>
+              <h2 id="learning-settings-title">Learning preferences</h2>
+              <p>These choices update your dashboard and lessons.</p>
+            </div>
+          </div>
+
+          <div className="settings-grid">
+            <label>
+              Learning language
+              <select
+                value={learningLanguageId}
+                onChange={(event) => setLearningLanguageId(event.target.value)}
+                required
+              >
+                <option value="" disabled>Choose a language</option>
+                {learningLanguages.map((language) => (
+                  <option key={language.id} value={language.id}>{language.name}</option>
                 ))}
               </select>
             </label>
 
-            {error && <p className="form__error">{error}</p>}
-            {saved && !emailConfirmPending && <p className="form__success">Saved.</p>}
+            <label>
+              Daily goal
+              <select
+                value={dailyGoalMinutes}
+                onChange={(event) => setDailyGoalMinutes(event.target.value)}
+              >
+                {DAILY_GOALS.map((minutes) => (
+                  <option key={minutes} value={minutes}>{minutes} minutes</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="toggle-row">
+            <span>
+              <strong>Show Japanese romanisation</strong>
+              <small>Display Latin pronunciation hints below Japanese answers.</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={showRomanization}
+              onChange={(event) => setShowRomanization(event.target.checked)}
+            />
+          </label>
+        </section>
+
+        <div className="settings-savebar">
+          <div aria-live="polite">
+            {error && <p className="form__error" role="alert">{error}</p>}
+            {saved && !emailConfirmPending && <p className="form__success">Your changes are saved.</p>}
             {saved && emailConfirmPending && (
               <p className="form__success">
-                Saved. Check your new email address for a confirmation link — your
-                login email won't change until you confirm it.
+                Saved. Confirm the message sent to your new email before it becomes your login.
               </p>
             )}
-
-            <button type="submit" disabled={saving}>
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
-          </form>
+          </div>
+          <button type="submit" className="button button--primary" disabled={saving || uploading}>
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
         </div>
-      </div>
+      </form>
     </section>
   );
 }

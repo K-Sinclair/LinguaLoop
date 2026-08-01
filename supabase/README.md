@@ -21,7 +21,7 @@ The project reference is the subdomain in
 `https://YOUR_PROJECT_REF.supabase.co`. Do not put a database password or
 service-role key in the React application.
 
-## Existing Week 1 database
+## Existing project database
 
 The first migration upgrades the existing scaffold as well as creating a new
 database. It:
@@ -35,6 +35,11 @@ database. It:
 
 Run `npx supabase db push`, then use the Supabase Security Advisor to confirm
 that no exposed table is missing RLS.
+
+The Week 3 migration adds learning preferences and the first two flashcard
+units. It uses explicit browser-role grants as well as RLS, so the curriculum
+is readable while profiles and progress remain owner-only. Apply migrations
+before deploying React code that expects the new profile columns.
 
 ## Adding another migration
 

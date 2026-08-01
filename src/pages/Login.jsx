@@ -34,7 +34,7 @@ export default function Login() {
       <div className="card auth-card">
         <p className="eyebrow">Welcome back</p>
         <h1>Log in to LinguaLoop</h1>
-        <p className="auth-card__text">Pick up where you left off and keep your language streak alive.</p>
+        <p className="auth-card__text">Pick up where you left off and continue your learning path.</p>
 
         <form className="form auth-form" onSubmit={handleSubmit}>
           <label>
@@ -44,6 +44,7 @@ export default function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              autoComplete="email"
               required
             />
           </label>
@@ -54,6 +55,7 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
+              autoComplete="current-password"
               required
             />
           </label>
