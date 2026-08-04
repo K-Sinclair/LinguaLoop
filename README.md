@@ -1,7 +1,7 @@
 # LinguaLoop
 
 LinguaLoop is a React, Vite, and Supabase language-learning application built
-as a 15-week university project. This repository currently contains the
+as a 15-week project. This repository currently contains the
 foundation plus its first complete learning loop: authentication, protected
 routes, profiles, avatar storage, flashcards, saved progress, database
 migrations, and GitHub Pages deployment.
